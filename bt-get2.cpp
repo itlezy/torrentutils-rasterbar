@@ -28,10 +28,6 @@ namespace {
 	// return the name of a torrent status enum
 	char const* state(lt::torrent_status::state_t s)
 	{
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wcovered-switch-default"
-#endif
 		switch (s) {
 		case lt::torrent_status::checking_files: return "checking";
 		case lt::torrent_status::downloading_metadata: return "dl metadata";
@@ -41,19 +37,25 @@ namespace {
 		case lt::torrent_status::checking_resume_data: return "checking resume";
 		default: return "<>";
 		}
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
 	}
-
 } // anonymous namespace
+
+void readFile(const char* filename, std::list<std::string>& lines)
+{
+	lines.clear();
+	std::ifstream file(filename);
+	std::string s;
+
+	while (std::getline(file, s))
+		lines.push_back(s);
+}
 
 int main(int argc, char const* argv[]) try
 {
 	spdlog::info("Laudem!!");
 
 	if (argc != 2) {
-		std::cerr << "usage: " << argv[0] << " <magnet-url>" << std::endl;
+		std::cerr << "usage: " << argv[0] << " <hashes file.txt>" << std::endl;
 		return 1;
 	}
 
@@ -71,15 +73,14 @@ int main(int argc, char const* argv[]) try
 	lt::session ses(pack);
 	clk::time_point last_save_resume = clk::now();
 
-	std::string hashes[] = {
-		
-	};
+	std::list<std::string> lines;
 
+	readFile(argv[1], lines);
 
-	for (std::string value : hashes) {
+	for (std::string value : lines) {
 		spdlog::info("Adding torrent {}", value);
 
-		lt::add_torrent_params add_tor_params = lt::parse_magnet_uri(value);
+		lt::add_torrent_params add_tor_params = lt::parse_magnet_uri("magnet:?xt=urn:btih:" + value);
 		//magnet.flags |= lt::torrent_flags::upload_mode;
 		add_tor_params.save_path = "."; // save in current dir
 
@@ -89,7 +90,6 @@ int main(int argc, char const* argv[]) try
 		// added
 		lt::torrent_handle h;
 	}
-
 
 	// set when we're exiting
 	bool done = false;
@@ -159,13 +159,22 @@ int main(int argc, char const* argv[]) try
 			}
 
 			if (lt::alert_cast<lt::save_resume_data_failed_alert>(a)) {
-				std::cout << "Save resume data failed!!";
+				spdlog::error("Save resume data failed!!");
 				if (done) goto done;
 			}
 
 			if (auto st = lt::alert_cast<lt::state_update_alert>(a)) {
+				if (st->status.empty()) continue;
 
+				// we only have a single torrent, so we know which one
+				// the status is for
+				lt::torrent_status const& s = st->status[0];
+
+				spdlog::info("Torrent status {}, {} peers", state(s.state), s.num_peers);
+
+				std::cout.flush();
 			}
+
 		}
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(1500));
